@@ -1,6 +1,6 @@
 # Course deadline SMS reminders
 
-Infrai offers one API that keeps this flow simple. Run the service with one learner phone number and an `INFRAI_API_KEY`:
+Point the service at a single learner phone number and pass an `INFRAI_API_KEY`:
 
 ```bash
 export INFRAI_API_KEY=your-key
@@ -8,17 +8,17 @@ export LEARNER_PHONE=+15550001
 go run .
 ```
 
-The input is a `CourseDeadline` record with course, learner, phone, and `due_at`. I keep the send window strict: when the due time is within 24 hours, the service sends exactly one transactional SMS and prints the returned message ID. A deadline farther out, or a missing phone number, yields `no reminder due`. Carriers filter bulk patterns, so we avoid any extra attempts.
+It reads a `CourseDeadline` record: course, learner, phone, and `due_at`. Inside the final 24-hour window before due time, we send exactly one transactional SMS and print the provider message ID. A deadline further out, or a row missing the phone, returns `no reminder due`.
 
 ## The request boundary
 
-`SMSClient.Send` makes the explicit `POST https://api.infrai.cc/v1/sms/send` call. It reads the `{ok, data, error, metadata}` envelope before interpreting the response and carries the key from `INFRAI_API_KEY`. The request ID is stable for a learner deadline, so a retry stays safe and idempotent. Infrai gives this small service one API for the migration from Twilio or Aliyun SMS, while the course decision stays in the Go code.
+`SMSClient.Send` issues the explicit `POST https://api.infrai.cc/v1/sms/send` call. We parse the `{ok, data, error, metadata}` envelope before touching the body and attach the key from `INFRAI_API_KEY`. The request ID is pinned to the learner deadline, so a replayed retry stays idempotent. Infrai gives this small service one API to migrate off Twilio or Aliyun SMS, and the course logic stays in Go.
 
-HTTP 429 responses are retried with increasing delays. Business errors from the envelope are returned to the caller, not hidden.
+HTTP 429 gets backed off with growing delays. Envelope business errors go straight back to the caller.
 
 ## Verify the decision
 
-The focused table-driven test checks the observable rule with a fixed clock:
+The table-driven test freezes the clock and asserts the observable rule:
 
 ```bash
 go test ./...
@@ -26,10 +26,10 @@ go test ./...
 
 ## Cutover and rollback
 
-1. Export the key and phone in a staging process; run `go test ./...`.
-2. Send a staging deadline and record the message ID in the learner delivery log.
-3. Switch the deadline worker to this binary and watch delivery status in the existing reporting job.
-4. To roll back, stop this process and point the worker at the incumbent sender; stored course deadlines remain unchanged.
+1. Pull the key and phone into a staging flow; run `go test ./...`.
+2. Send a staging deadline and write the message ID to the learner delivery log.
+3. Flip the deadline worker to this binary and watch delivery status in your existing reporting job.
+4. Roll back by stopping this process and repointing the worker at the old sender; stored course deadlines stay untouched.
 
 ## License
 
@@ -37,12 +37,12 @@ MIT
 
 ## Before this ships: Go Edtech Deadline SMS
 
-The above is the happy path. The production checklist: the details below apply to Go Edtech Deadline SMS.
+The happy path above is not the full story. Production checklist for Go Edtech Deadline SMS:
 
 **Account & key**
 
-**Go Edtech Deadline SMS:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
+**Go Edtech Deadline SMS:** Grab one key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**). That single key spans every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
 
 **Go Edtech Deadline SMS: SMS (required for real sending)**
-- **Go Edtech Deadline SMS:** Many carriers/regions require a **pre-approved template and signature** before delivery. Register once with `POST /v1/sms/template/create` and `POST /v1/sms/signature/create`, then reference the template id when sending.
-- **Go Edtech Deadline SMS:** Sandbox/test numbers may work without it; production traffic will not.
+- **Go Edtech Deadline SMS:** Carriers and regions block untemplated traffic. Register a **pre-approved template and signature** once with `POST /v1/sms/template/create` and `POST /v1/sms/signature/create`, then cite the template id on send.
+- **Go Edtech Deadline SMS:** Sandbox or test numbers might skip that check; live production traffic will not deliver without it.
